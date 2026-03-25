@@ -233,3 +233,179 @@ android {
 | `com.google.android.gms:play-services-ads-identifier` | `18.0.1` |
 | `com.android.tools:desugar_jdk_libs` | `2.1.3` |
 | `org.jetbrains.kotlin:kotlin-stdlib` | `1.8.10` |
+
+---
+
+## 🎮 IMAAdManager — Usage Guide
+
+`IMAAdManager` is the Unity-side C# script that bootstraps the Android plugin and exposes a clean event system for your game to react to ad lifecycle changes.
+
+---
+
+### Scene Setup
+
+1. Create a **new GameObject** in your scene and name it exactly `IMAAdManager`.
+2. Attach the `IMAAdManager` script to it.
+3. The GameObject name **must match** the `Callback Target Name` field in the Inspector — Android uses `UnitySendMessage("<name>", ...)` to route all callbacks to this object.
+
+> ⚠️ If the names don't match, all ad events will be silently lost.
+
+---
+
+### Inspector Fields
+
+#### General
+
+| Field | Description |
+|-------|-------------|
+| `Callback Target Name` | Must match the GameObject's name. Default: `IMAAdManager` |
+| `Default Ad Tag Url` | VAST or VMAP tag URL used when `RequestAd()` is called with no argument |
+| `Request On Start` | If enabled, automatically requests an ad when the scene loads |
+
+#### Strict Gap
+
+| Field | Description |
+|-------|-------------|
+| `Use Strict Gap` | Prevents ads from being requested again until the cooldown expires |
+| `Strict Gap Seconds` | Minimum seconds between ad sessions (minimum: 1) |
+
+When a request is blocked by the cooldown, `OnAdBlockedByGap` fires with the remaining wait time in seconds.
+
+---
+
+### Public API
+
+```csharp
+// Request an ad using the Default Ad Tag URL set in the Inspector
+imaAdManager.RequestAd();
+
+// Request an ad with a specific URL
+imaAdManager.RequestAd("https://your-ad-tag-url.com/...");
+
+// Pause / Resume / Skip the current ad
+imaAdManager.PauseAd();
+imaAdManager.ResumeAd();
+imaAdManager.SkipAd(); // No-op if the ad is not yet skippable
+
+// Change settings at runtime
+imaAdManager.DefaultAdTagUrl = "https://new-tag-url.com/...";
+imaAdManager.UseStrictGap = true;
+imaAdManager.StrictGapSeconds = 120;
+```
+
+---
+
+### Subscribing to Events in Code
+
+Every event has both a **C# event** (for code subscribers) and a **UnityEvent** (wirable in the Inspector). You only need one or the other.
+
+```csharp
+void OnEnable()
+{
+    // Pause game audio/logic when an ad is about to play
+    imaAdManager.ContentPauseRequested += OnContentPause;
+
+    // Resume game audio/logic when the ad session ends
+    imaAdManager.ContentResumeRequested += OnContentResume;
+
+    // Track completion
+    imaAdManager.AllAdsCompleted += OnAllAdsCompleted;
+
+    // Handle errors
+    imaAdManager.AdLoaderError  += OnAdError;
+    imaAdManager.AdManagerError += OnAdError;
+
+    // Strict gap — tell the user to wait
+    imaAdManager.AdBlockedByGap += OnGapBlocked;
+}
+
+void OnDisable()
+{
+    imaAdManager.ContentPauseRequested  -= OnContentPause;
+    imaAdManager.ContentResumeRequested -= OnContentResume;
+    imaAdManager.AllAdsCompleted        -= OnAllAdsCompleted;
+    imaAdManager.AdLoaderError          -= OnAdError;
+    imaAdManager.AdManagerError         -= OnAdError;
+    imaAdManager.AdBlockedByGap         -= OnGapBlocked;
+}
+
+void OnContentPause()   => AudioListener.pause = true;
+void OnContentResume()  => AudioListener.pause = false;
+void OnAllAdsCompleted() => Debug.Log("Ad session finished.");
+void OnAdError(string msg) => Debug.LogError($"Ad error: {msg}");
+void OnGapBlocked(string remaining) => Debug.Log($"Ad on cooldown. Retry in {remaining}s.");
+```
+
+---
+
+### Tracking Ad Progress
+
+`OnAdProgress` fires approximately 4 times per second during playback. The message format is `"currentMs/durationMs"`.
+
+```csharp
+imaAdManager.AdProgress += msg =>
+{
+    var parts = msg.Split('/');
+    if (parts.Length == 2 &&
+        float.TryParse(parts[0], out float current) &&
+        float.TryParse(parts[1], out float duration))
+    {
+        float pct = current / duration; // 0.0 – 1.0
+        progressBar.value = pct;
+    }
+};
+```
+
+---
+
+### Events Reference
+
+#### Lifecycle
+
+| Event | When it fires |
+|-------|--------------|
+| `AdLoaded` | Creative loaded; playback about to begin |
+| `AdStarted` | Playback started |
+| `AdPaused` | Playback paused |
+| `AdResumed` | Playback resumed after a pause |
+| `AdCompleted` | A single ad in the pod finished |
+| `AllAdsCompleted` | Entire ad session finished |
+| `ContentPauseRequested` | Ad is about to play — pause/mute your game here |
+| `ContentResumeRequested` | Ad session is over — resume your game here |
+
+#### Progress
+
+| Event | When it fires |
+|-------|--------------|
+| `AdProgress(string)` | ~4 Hz during playback. Format: `"currentMs/durationMs"` |
+| `AdFirstQuartile` | 25% of the ad played |
+| `AdMidpoint` | 50% of the ad played |
+| `AdThirdQuartile` | 75% of the ad played |
+
+#### Interaction
+
+| Event | When it fires |
+|-------|--------------|
+| `AdClicked` | User tapped the ad (click-through) |
+| `AdSkipped` | User tapped the Skip button |
+| `AdSkippableStateChanged(string)` | `"true"` when Skip button appears, `"false"` when it disappears |
+| `AdIconViewed` | Ad icon was viewed |
+
+#### Errors
+
+| Event | When it fires |
+|-------|--------------|
+| `AdLoaderError(string)` | AdsLoader failed — message contains error details |
+| `AdManagerError(string)` | AdsManager failed — message contains error details |
+
+#### Strict Gap
+
+| Event | When it fires |
+|-------|--------------|
+| `AdBlockedByGap(string)` | Request rejected by cooldown — message is remaining seconds |
+
+---
+
+### Editor Behaviour
+
+The Android plugin is **not active in the Unity Editor**. All `RequestAd()`, `PauseAd()`, `ResumeAd()`, and `SkipAd()` calls are silently stubbed with a `Debug.Log`. Build and deploy to an Android device to test ad playback.
