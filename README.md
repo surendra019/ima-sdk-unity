@@ -4,6 +4,10 @@ A pre-configured `.aar` bundle and Gradle setup for integrating **Google IMA SDK
 
 ---
 
+<p align="center">
+  <img src="assets/visual.gif" alt="IMA SDK Demo" width="320" />
+</p>
+
 ## 📦 Installation
 
 ### Step 1 – Download the `.aar`
